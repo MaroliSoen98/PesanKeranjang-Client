@@ -715,79 +715,79 @@ class _TrackingTabState extends State<TrackingTab> {
                       return const Center(child: CircularProgressIndicator());
                     }
 
-                      if (!snapshot.hasData || !snapshot.data!.exists) {
-                        return Center(
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(Icons.search_off, size: 64, color: Colors.grey.shade400),
-                              const SizedBox(height: 16),
-                              Text('Pesanan tidak ditemukan.', style: TextStyle(fontSize: 18, color: Colors.grey.shade600)),
-                              const Text('Pastikan nomor resi sudah benar.', style: TextStyle(color: Colors.grey)),
-                            ],
-                          ),
-                        );
-                      }
-
-                      final data = snapshot.data!.data() as Map<String, dynamic>;
-                      final isPickedUp = data['isPickedUp'] ?? false;
-                      final pickupDate = DateTime.tryParse(data['pickupDate'] ?? '') ?? DateTime.now();
-                      final orderDate = DateTime.tryParse(data['orderDate'] ?? '') ?? DateTime.now();
-                      final weight = (data['weightKg'] as num?)?.toDouble() ?? 0.0;
-                      final totalPrice = weight * 45000;
-
-                      return Card(
-                        elevation: 0,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(24),
-                          side: BorderSide(color: Colors.grey.shade200)
-                        ),
-                        color: Colors.white,
-                        child: Padding(
-                          padding: const EdgeInsets.all(24),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                children: [
-                                  const Text('Status Pesanan', style: TextStyle(color: Colors.black54)),
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                                    decoration: BoxDecoration(
-                                      color: isPickedUp ? Colors.green.shade50 : Colors.orange.shade50,
-                                      borderRadius: BorderRadius.circular(20),
-                                    ),
-                                    child: Row(
-                                      children: [
-                                        Icon(isPickedUp ? Icons.check_circle : Icons.pending, size: 16, color: isPickedUp ? Colors.green : Colors.orange),
-                                        const SizedBox(width: 6),
-                                        Text(
-                                          isPickedUp ? 'Sudah Diambil' : 'Sedang Diproses',
-                                          style: TextStyle(fontWeight: FontWeight.bold, color: isPickedUp ? Colors.green.shade700 : Colors.orange.shade800),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              const Padding(padding: EdgeInsets.symmetric(vertical: 16), child: Divider(height: 1)),
-                              Text(data['customerName'] ?? 'Tanpa Nama', style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
-                              const SizedBox(height: 16),
-                              _buildDetailRow(Icons.calendar_today, 'Tanggal Pesan', _formatDate(orderDate)),
-                              const SizedBox(height: 12),
-                              _buildDetailRow(Icons.event, 'Jadwal Ambil', _formatDate(pickupDate)),
-                              const SizedBox(height: 12),
-                              _buildDetailRow(Icons.scale, 'Bobot Kue', '${weight.toStringAsFixed(1)} kg'),
-                              const SizedBox(height: 12),
-                              _buildDetailRow(Icons.payments, 'Total Tagihan', _formatCurrency(totalPrice), valueColor: Colors.deepOrange),
-                            ],
-                          ),
+                    if (!snapshot.hasData || !snapshot.data!.exists) {
+                      return Center(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.search_off, size: 64, color: Colors.grey.shade400),
+                            const SizedBox(height: 16),
+                            Text('Pesanan tidak ditemukan.', style: TextStyle(fontSize: 18, color: Colors.grey.shade600)),
+                            const Text('Pastikan nomor resi sudah benar.', style: TextStyle(color: Colors.grey)),
+                          ],
                         ),
                       );
-                    },
-                  ),
+                    }
+
+                    final data = snapshot.data!.data() as Map<String, dynamic>;
+                    final isPickedUp = data['isPickedUp'] ?? false;
+                    final pickupDate = DateTime.tryParse(data['pickupDate'] ?? '') ?? DateTime.now();
+                    final orderDate = DateTime.tryParse(data['orderDate'] ?? '') ?? DateTime.now();
+                    final weight = (data['weightKg'] as num?)?.toDouble() ?? 0.0;
+                    final totalPrice = weight * 45000;
+
+                    return Card(
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(24),
+                        side: BorderSide(color: Colors.grey.shade200)
+                      ),
+                      color: Colors.white,
+                      child: Padding(
+                        padding: const EdgeInsets.all(24),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                const Text('Status Pesanan', style: TextStyle(color: Colors.black54)),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                  decoration: BoxDecoration(
+                                    color: isPickedUp ? Colors.green.shade50 : Colors.orange.shade50,
+                                    borderRadius: BorderRadius.circular(20),
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      Icon(isPickedUp ? Icons.check_circle : Icons.pending, size: 16, color: isPickedUp ? Colors.green : Colors.orange),
+                                      const SizedBox(width: 6),
+                                      Text(
+                                        isPickedUp ? 'Sudah Diambil' : 'Sedang Diproses',
+                                        style: TextStyle(fontWeight: FontWeight.bold, color: isPickedUp ? Colors.green.shade700 : Colors.orange.shade800),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const Padding(padding: EdgeInsets.symmetric(vertical: 16), child: Divider(height: 1)),
+                            Text(data['customerName'] ?? 'Tanpa Nama', style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+                            const SizedBox(height: 16),
+                            _buildDetailRow(Icons.calendar_today, 'Tanggal Pesan', _formatDate(orderDate)),
+                            const SizedBox(height: 12),
+                            _buildDetailRow(Icons.event, 'Jadwal Ambil', _formatDate(pickupDate)),
+                            const SizedBox(height: 12),
+                            _buildDetailRow(Icons.scale, 'Bobot Kue', '${weight.toStringAsFixed(1)} kg'),
+                            const SizedBox(height: 12),
+                            _buildDetailRow(Icons.payments, 'Total Tagihan', _formatCurrency(totalPrice), valueColor: Colors.deepOrange),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
             ],
           ),
         ),

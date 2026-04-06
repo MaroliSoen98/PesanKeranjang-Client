@@ -11,8 +11,12 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:pesan_keranjang_client/main.dart';
 
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
+  testWidgets('App UI smoke test', (WidgetTester tester) async {
     // Build our app and trigger a frame.
     await tester.pumpWidget(const ClientApp());
+    await tester.pumpAndSettle();
+
+    // Memastikan aplikasi berhasil di-render
+    expect(find.text('Pesan Keranjang'), findsWidgets);
   });
 }
