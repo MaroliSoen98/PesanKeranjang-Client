@@ -21,25 +21,13 @@ class DefaultFirebaseOptions {
     }
     switch (defaultTargetPlatform) {
       case TargetPlatform.android:
-        throw UnsupportedError(
-          'DefaultFirebaseOptions have not been configured for android - '
-          'you can reconfigure this by running the FlutterFire CLI again.',
-        );
+        return android;
       case TargetPlatform.iOS:
-        throw UnsupportedError(
-          'DefaultFirebaseOptions have not been configured for ios - '
-          'you can reconfigure this by running the FlutterFire CLI again.',
-        );
+        return ios;
       case TargetPlatform.macOS:
-        throw UnsupportedError(
-          'DefaultFirebaseOptions have not been configured for macos - '
-          'you can reconfigure this by running the FlutterFire CLI again.',
-        );
+        return macos;
       case TargetPlatform.windows:
-        throw UnsupportedError(
-          'DefaultFirebaseOptions have not been configured for windows - '
-          'you can reconfigure this by running the FlutterFire CLI again.',
-        );
+        return windows;
       case TargetPlatform.linux:
         throw UnsupportedError(
           'DefaultFirebaseOptions have not been configured for linux - '
@@ -61,4 +49,41 @@ class DefaultFirebaseOptions {
     storageBucket: 'pesan-keranjang.firebasestorage.app',
     measurementId: 'G-THYZSRNT5X',
   );
+
+  static const FirebaseOptions macos = FirebaseOptions(
+    apiKey: 'AIzaSyDnP9UwoB6L8ssoLgA5dZJN3cvBt8yDT88',
+    appId: '1:821168628456:ios:f7f2b0a9c2bb9930929f5d',
+    messagingSenderId: '821168628456',
+    projectId: 'pesan-keranjang',
+    storageBucket: 'pesan-keranjang.firebasestorage.app',
+    iosBundleId: 'com.example.pesanKeranjangClient',
+  );
+
+  static const FirebaseOptions ios = FirebaseOptions(
+    apiKey: 'AIzaSyDnP9UwoB6L8ssoLgA5dZJN3cvBt8yDT88',
+    appId: '1:821168628456:ios:f7f2b0a9c2bb9930929f5d',
+    messagingSenderId: '821168628456',
+    projectId: 'pesan-keranjang',
+    storageBucket: 'pesan-keranjang.firebasestorage.app',
+    iosBundleId: 'com.example.pesanKeranjangClient',
+  );
+
+  static const FirebaseOptions android = FirebaseOptions(
+    apiKey: 'AIzaSyB0oNWOY9f_fUf3u6nNg3hr6lL-Ngfeww4',
+    appId: '1:821168628456:android:1cb4bff02ad74344929f5d',
+    messagingSenderId: '821168628456',
+    projectId: 'pesan-keranjang',
+    storageBucket: 'pesan-keranjang.firebasestorage.app',
+  );
+
+  static const FirebaseOptions windows = FirebaseOptions(
+    apiKey: 'AIzaSyDi7JTB6U1QLaHGuG2u8tg67XyC7gRyyVc',
+    appId: '1:821168628456:web:01e8cf30a666d1d8929f5d',
+    messagingSenderId: '821168628456',
+    projectId: 'pesan-keranjang',
+    authDomain: 'pesan-keranjang.firebaseapp.com',
+    storageBucket: 'pesan-keranjang.firebasestorage.app',
+    measurementId: 'G-RJCVCG77M1',
+  );
+
 }
