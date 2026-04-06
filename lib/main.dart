@@ -272,10 +272,6 @@ class _QRScannerTabState extends State<QRScannerTab> {
 
   @override
   Widget build(BuildContext context) {
-    if (!widget.isActive) {
-      return const Center(child: Icon(Icons.qr_code_scanner, size: 64, color: Colors.grey));
-    }
-
     return Stack(
       children: [
         MobileScanner(
