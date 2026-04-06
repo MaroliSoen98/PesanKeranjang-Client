@@ -9,9 +9,13 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform,
-  );
+  try {
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
+  } catch (e) {
+    debugPrint('Gagal inisialisasi Firebase (cek firebase_options.dart): $e');
+  }
   runApp(const ClientApp());
 }
 
@@ -241,6 +245,7 @@ class _QRScannerTabState extends State<QRScannerTab> {
     super.initState();
     _scannerController = MobileScannerController(
       detectionSpeed: DetectionSpeed.noDuplicates,
+      autoStart: false, // Mencegah crash kamera akibat auto-start yang bentrok saat pindah tab
     );
     if (widget.isActive) _scannerController.start();
   }
@@ -659,7 +664,7 @@ class _TrackingTabState extends State<TrackingTab> {
   }
 
   String _formatCurrency(double amount) {
-    return 'Rp ' + amount.toInt().toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]}.');
+    return 'Rp ${amount.toInt().toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]}.')}';
   }
 
   @override
@@ -726,9 +731,9 @@ class _TrackingTabState extends State<TrackingTab> {
 
                       final data = snapshot.data!.data() as Map<String, dynamic>;
                       final isPickedUp = data['isPickedUp'] ?? false;
-                      final pickupDate = DateTime.parse(data['pickupDate']);
-                      final orderDate = DateTime.parse(data['orderDate']);
-                      final weight = (data['weightKg'] as num).toDouble();
+                      final pickupDate = DateTime.tryParse(data['pickupDate'] ?? '') ?? DateTime.now();
+                      final orderDate = DateTime.tryParse(data['orderDate'] ?? '') ?? DateTime.now();
+                      final weight = (data['weightKg'] as num?)?.toDouble() ?? 0.0;
                       final totalPrice = weight * 45000;
 
                       return Card(
