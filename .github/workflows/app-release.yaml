@@ -6,6 +6,9 @@ on:
       - main # Akan berjalan saat ada push ke branch main
   workflow_dispatch: # Mengizinkan Anda untuk menjalankan workflow secara manual dari tab Actions
 
+permissions:
+  contents: write # Wajib agar GitHub Actions diizinkan membuat Tag & Release
+
 jobs:
   build:
     name: Build APK
@@ -30,11 +33,21 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
-      - name: Build APK
-        run: flutter build apk --release
+      - name: Build APK (Auto Versioning)
+        # Menimpa versi pubspec dengan versi dari GitHub Run Number
+        run: flutter build apk --release --build-name=1.0.${{ github.run_number }} --build-number=${{ github.run_number }}
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: app-release-apk
           path: build/app/outputs/flutter-apk/app-release.apk
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.${{ github.run_number }}
+          name: Release v1.0.${{ github.run_number }}
+          files: build/app/outputs/flutter-apk/app-release.apk
+          draft: false
+          prerelease: false
