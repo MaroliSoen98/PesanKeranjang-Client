@@ -8,6 +8,7 @@ import 'package:http/http.dart' as http;
 import 'firebase_options.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -73,14 +74,20 @@ class _SplashScreenState extends State<SplashScreen> {
       debugPrint('Gagal inisialisasi Firebase: $e');
     }
 
+    // Cek apakah user sudah pernah login (menyimpan nama) sebelumnya
+    final prefs = await SharedPreferences.getInstance();
+    final bool isLoggedIn = prefs.getString('user_name') != null;
+
     // 2. Beri sedikit delay (misal 2 detik) agar tulisan dan loading icon sempat terlihat
     await Future.delayed(const Duration(seconds: 2));
 
-    // 3. Pindah ke MainScreen
+    // 3. Pindah ke MainScreen atau LoginScreen
     if (mounted) {
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (context) => const MainScreen()),
-      );
+      if (isLoggedIn) {
+        Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (context) => const MainScreen()));
+      } else {
+        Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (context) => const LoginScreen()));
+      }
     }
   }
 
@@ -117,6 +124,108 @@ class _SplashScreenState extends State<SplashScreen> {
               color: Colors.deepOrange,
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+// ============================================================================
+// SCREEN: LOGIN / ONBOARDING (FIRST TIME ONLY)
+// ============================================================================
+class LoginScreen extends StatefulWidget {
+  const LoginScreen({super.key});
+
+  @override
+  State<LoginScreen> createState() => _LoginScreenState();
+}
+
+class _LoginScreenState extends State<LoginScreen> {
+  final _nameController = TextEditingController();
+  final _phoneController = TextEditingController();
+  bool _isLoading = false;
+
+  Future<void> _login() async {
+    if (_nameController.text.trim().isEmpty || _phoneController.text.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Nama dan Nomor WA wajib diisi!')),
+      );
+      return;
+    }
+
+    setState(() => _isLoading = true);
+    // Simpan identitas ke penyimpanan lokal HP (Session)
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('user_name', _nameController.text.trim());
+    await prefs.setString('user_phone', _phoneController.text.trim());
+
+    if (mounted) {
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (context) => const MainScreen()),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(32),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Icon(Icons.account_circle, size: 80, color: Colors.deepOrange.shade300),
+                const SizedBox(height: 24),
+                const Text(
+                  'Selamat Datang!',
+                  style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.black87),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Silakan isi data diri Anda. Cukup sekali saja untuk memudahkan pemesanan Anda selanjutnya.',
+                  style: TextStyle(fontSize: 15, color: Colors.grey.shade600),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 48),
+                TextField(
+                  controller: _nameController,
+                  textCapitalization: TextCapitalization.words,
+                  decoration: const InputDecoration(
+                    labelText: 'Nama Lengkap',
+                    prefixIcon: Icon(Icons.person_outline),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: _phoneController,
+                  keyboardType: TextInputType.phone,
+                  decoration: const InputDecoration(
+                    labelText: 'Nomor WhatsApp',
+                    prefixIcon: Icon(Icons.phone_outlined),
+                    hintText: 'Contoh: 081234567890',
+                  ),
+                ),
+                const SizedBox(height: 32),
+                SizedBox(
+                  height: 52,
+                  child: FilledButton(
+                    onPressed: _isLoading ? null : _login,
+                    style: FilledButton.styleFrom(
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                      backgroundColor: Colors.deepOrange,
+                    ),
+                    child: _isLoading
+                        ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                        : const Text('Mulai Pesan', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                  ),
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );
@@ -271,7 +380,14 @@ class _MainScreenState extends State<MainScreen> {
       body: IndexedStack(
         index: _selectedIndex,
         children: [
-          const OrderFormTab(),
+          OrderFormTab(
+            onOrderSuccess: (resi) {
+              setState(() {
+                _scannedResi = resi;
+                _selectedIndex = 2; // Pindah otomatis ke Lacak Pesanan
+              });
+            },
+          ),
           QRScannerTab(
             isActive: _selectedIndex == 1,
             onScanSuccess: (resi) {
@@ -494,7 +610,9 @@ class _QRScannerTabState extends State<QRScannerTab> {
 // TAB 1: FORM PEMESANAN
 // ============================================================================
 class OrderFormTab extends StatefulWidget {
-  const OrderFormTab({super.key});
+  final Function(String) onOrderSuccess;
+
+  const OrderFormTab({super.key, required this.onOrderSuccess});
 
   @override
   State<OrderFormTab> createState() => _OrderFormTabState();
@@ -503,6 +621,21 @@ class OrderFormTab extends StatefulWidget {
 class _OrderFormTabState extends State<OrderFormTab> {
   final _nameController = TextEditingController();
   DateTime? _pickupDate;
+  String _userPhone = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _loadUserData();
+  }
+
+  Future<void> _loadUserData() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _nameController.text = prefs.getString('user_name') ?? '';
+      _userPhone = prefs.getString('user_phone') ?? '';
+    });
+  }
 
   // --- TAHAP 1: DATA MENU & KERANJANG ---
   final List<Map<String, dynamic>> _menuItems = [
@@ -784,6 +917,7 @@ class _OrderFormTabState extends State<OrderFormTab> {
       await FirebaseFirestore.instance.collection('orders').doc(noResi).set({
         'resi': noResi, // Simpan juga di dalam field dokumen agar mudah dibaca Admin
         'customerName': name,
+        'customerPhone': _userPhone, // Identifikasi orderan ini milik siapa
         'orderDate': DateTime.now().toIso8601String(),
         'pickupDate': _pickupDate!.toIso8601String(),
         'items': _cart, // Simpan isi keranjang
@@ -874,7 +1008,10 @@ class _OrderFormTabState extends State<OrderFormTab> {
             ),
             const SizedBox(height: 8),
             FilledButton(
-              onPressed: () => Navigator.pop(context),
+              onPressed: () {
+                Navigator.pop(context); // Tutup pop-up sukses
+                widget.onOrderSuccess(resi); // Arahkan ke tab Lacak Pesanan dan auto search
+              },
               style: FilledButton.styleFrom(
                 minimumSize: const Size(double.infinity, 48),
                 backgroundColor: Colors.grey.shade200,
@@ -1056,15 +1193,43 @@ class TrackingTab extends StatefulWidget {
 
 class _TrackingTabState extends State<TrackingTab> {
   final _resiController = TextEditingController();
-  String _searchedResi = '';
+  final PageController _pageController = PageController(viewportFraction: 0.88);
+  List<String> _savedResis = [];
+  int _currentPage = 0;
+  bool _isLoadingCache = true;
 
   @override
   void initState() {
     super.initState();
-    if (widget.initialResi != null && widget.initialResi!.isNotEmpty) {
-      _resiController.text = widget.initialResi!;
-      _searchedResi = widget.initialResi!;
+    _initCache(widget.initialResi);
+  }
+
+  Future<void> _initCache(String? newResi) async {
+    final prefs = await SharedPreferences.getInstance();
+    List<String> saved = prefs.getStringList('saved_resis') ?? [];
+
+    if (newResi != null && newResi.isNotEmpty) {
+      saved.remove(newResi);
+      saved.insert(0, newResi);
+      await prefs.setStringList('saved_resis', saved);
     }
+
+    if (mounted) {
+      setState(() {
+        _savedResis = saved;
+        _isLoadingCache = false;
+        if (saved.isNotEmpty) {
+          _resiController.text = saved[0];
+        }
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _pageController.dispose();
+    _resiController.dispose();
+    super.dispose();
   }
 
   @override
@@ -1072,9 +1237,47 @@ class _TrackingTabState extends State<TrackingTab> {
     super.didUpdateWidget(oldWidget);
     // Jalankan otomatis ketika resi baru dioper dari Tab Scanner
     if (widget.initialResi != oldWidget.initialResi && widget.initialResi != null && widget.initialResi!.isNotEmpty) {
+      _addNewResi(widget.initialResi!);
+    }
+  }
+
+  Future<void> _addNewResi(String resi) async {
+    if (resi.isEmpty) return;
+    final prefs = await SharedPreferences.getInstance();
+    _savedResis.remove(resi);
+    _savedResis.insert(0, resi); // Taruh di paling atas/baru
+    await prefs.setStringList('saved_resis', _savedResis);
+
+    if (mounted) {
       setState(() {
-        _resiController.text = widget.initialResi!;
-        _searchedResi = widget.initialResi!;
+        _currentPage = 0;
+        _resiController.text = resi;
+      });
+      if (_pageController.hasClients) {
+        _pageController.jumpToPage(0);
+      }
+    }
+  }
+
+  Future<void> _deleteCurrentResi() async {
+    if (_savedResis.isEmpty) return;
+    final prefs = await SharedPreferences.getInstance();
+    _savedResis.removeAt(_currentPage);
+    await prefs.setStringList('saved_resis', _savedResis);
+
+    if (mounted) {
+      setState(() {
+        if (_currentPage >= _savedResis.length && _currentPage > 0) {
+          _currentPage--; // Mundur 1 halaman jika yang dihapus adalah halaman terakhir
+        }
+        if (_savedResis.isNotEmpty) {
+          _resiController.text = _savedResis[_currentPage];
+          if (_pageController.hasClients) {
+            _pageController.jumpToPage(_currentPage);
+          }
+        } else {
+          _resiController.clear();
+        }
       });
     }
   }
@@ -1094,175 +1297,278 @@ class _TrackingTabState extends State<TrackingTab> {
     return Center(
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 500),
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text('Lacak Pesanan', style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.black87)),
-              Text('Masukkan nomor resi untuk melihat status terkini.', style: TextStyle(fontSize: 16, color: Colors.grey.shade600)),
-              const SizedBox(height: 24),
-              
-              Row(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(left: 24, right: 24, top: 24),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Expanded(
-                    child: TextField(
-                      controller: _resiController,
-                      decoration: const InputDecoration(
-                        labelText: 'Nomor Resi',
-                        hintText: 'Contoh: RS-A1B2C3D4',
-                        prefixIcon: Icon(Icons.search, color: Colors.deepOrange),
+                  const Text('Lacak Pesanan', style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.black87)),
+                  Text('Masukkan nomor resi untuk melihat status terkini.', style: TextStyle(fontSize: 16, color: Colors.grey.shade600)),
+                  const SizedBox(height: 24),
+                  
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _resiController,
+                          decoration: const InputDecoration(
+                            labelText: 'Nomor Resi',
+                            hintText: 'Contoh: RS-A1B2C3D4',
+                            prefixIcon: Icon(Icons.search, color: Colors.deepOrange),
+                          ),
+                          onSubmitted: (val) => _addNewResi(val.trim()),
+                        ),
                       ),
-                      onSubmitted: (val) => setState(() => _searchedResi = val.trim()),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  SizedBox(
-                    height: 56,
-                    child: FilledButton(
-                      onPressed: () => setState(() => _searchedResi = _resiController.text.trim()),
-                      style: FilledButton.styleFrom(
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                        backgroundColor: Colors.deepOrange,
-                        foregroundColor: Colors.white,
+                      const SizedBox(width: 12),
+                      SizedBox(
+                        height: 56,
+                        child: FilledButton(
+                          onPressed: () => _addNewResi(_resiController.text.trim()),
+                          style: FilledButton.styleFrom(
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                            backgroundColor: Colors.deepOrange,
+                            foregroundColor: Colors.white,
+                          ),
+                          child: const Text('Cari', style: TextStyle(fontWeight: FontWeight.bold)),
+                        ),
                       ),
-                      child: const Text('Cari', style: TextStyle(fontWeight: FontWeight.bold)),
-                    ),
+                    ],
                   ),
                 ],
               ),
-              const SizedBox(height: 32),
+            ),
+            const SizedBox(height: 32),
 
-              if (_searchedResi.isNotEmpty)
-                StreamBuilder<DocumentSnapshot>(
-                  stream: FirebaseFirestore.instance.collection('orders').doc(_searchedResi).snapshots(),
-                  builder: (context, snapshot) {
-                    if (snapshot.connectionState == ConnectionState.waiting) {
-                      return const Center(child: CircularProgressIndicator());
-                    }
+            if (_isLoadingCache)
+              const Expanded(child: Center(child: CircularProgressIndicator()))
+            else if (_savedResis.isEmpty)
+              Expanded(
+                child: Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.history, size: 64, color: Colors.grey.shade300),
+                      const SizedBox(height: 16),
+                      Text('Belum ada riwayat pesanan.', style: TextStyle(fontSize: 16, color: Colors.grey.shade500)),
+                    ],
+                  ),
+                ),
+              )
+            else
+              Expanded(
+                child: Column(
+                  children: [
+                    Expanded(
+                      child: PageView.builder(
+                        physics: const BouncingScrollPhysics(),
+                        controller: _pageController,
+                        onPageChanged: (index) {
+                          setState(() {
+                            _currentPage = index;
+                            _resiController.text = _savedResis[index];
+                          });
+                        },
+                        itemCount: _savedResis.length,
+                        itemBuilder: (context, index) {
+                          return AnimatedBuilder(
+                            animation: _pageController,
+                            builder: (context, child) {
+                              double scale = 1.0;
+                              double opacity = 1.0;
+                              if (_pageController.position.haveDimensions) {
+                                double pageOffset = _pageController.page! - index;
+                                scale = (1 - (pageOffset.abs() * 0.1)).clamp(0.9, 1.0);
+                                opacity = (1 - (pageOffset.abs() * 0.5)).clamp(0.5, 1.0);
+                              } else {
+                                scale = _currentPage == index ? 1.0 : 0.9;
+                                opacity = _currentPage == index ? 1.0 : 0.5;
+                              }
+                              return Transform.scale(
+                                scale: scale,
+                                child: Opacity(opacity: opacity, child: child),
+                              );
+                            },
+                            child: SingleChildScrollView(
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
+                              child: StreamBuilder<DocumentSnapshot>(
+                              stream: FirebaseFirestore.instance.collection('orders').doc(_savedResis[index]).snapshots(),
+                              builder: (context, snapshot) {
+                                if (snapshot.connectionState == ConnectionState.waiting) {
+                                  return const Center(child: CircularProgressIndicator());
+                                }
 
-                    if (!snapshot.hasData || !snapshot.data!.exists) {
-                      return Center(
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(Icons.search_off, size: 64, color: Colors.grey.shade400),
-                            const SizedBox(height: 16),
-                            Text('Pesanan tidak ditemukan.', style: TextStyle(fontSize: 18, color: Colors.grey.shade600)),
-                            const Text('Resi salah, atau pesanan sudah dihapus oleh Admin.', style: TextStyle(color: Colors.grey)),
-                          ],
-                        ),
-                      );
-                    }
+                                if (!snapshot.hasData || !snapshot.data!.exists) {
+                                  return Center(
+                                    child: Column(
+                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      children: [
+                                        Icon(Icons.search_off, size: 64, color: Colors.grey.shade400),
+                                        const SizedBox(height: 16),
+                                        Text('Pesanan tidak ditemukan.', style: TextStyle(fontSize: 18, color: Colors.grey.shade600)),
+                                        const Text('Resi salah, atau pesanan sudah dihapus oleh Admin.', style: TextStyle(color: Colors.grey)),
+                                      ],
+                                    ),
+                                  );
+                                }
 
-                    final data = snapshot.data!.data() as Map<String, dynamic>;
-                    final isPickedUp = data['isPickedUp'] ?? false;
-                    final pickupDate = DateTime.tryParse(data['pickupDate'] ?? '') ?? DateTime.now();
-                    final orderDate = DateTime.tryParse(data['orderDate'] ?? '') ?? DateTime.now();
-                    final weight = (data['weightKg'] as num?)?.toDouble() ?? 0.0;
-                    final totalPrice = (data['totalPrice'] as num?)?.toDouble() ?? (weight * 45000);
-                    final notes = data['notes'] as String? ?? '';
+                                final data = snapshot.data!.data() as Map<String, dynamic>;
+                                final isPickedUp = data['isPickedUp'] ?? false;
+                                final pickupDate = DateTime.tryParse(data['pickupDate'] ?? '') ?? DateTime.now();
+                                final orderDate = DateTime.tryParse(data['orderDate'] ?? '') ?? DateTime.now();
+                                final weight = (data['weightKg'] as num?)?.toDouble() ?? 0.0;
+                                final totalPrice = (data['totalPrice'] as num?)?.toDouble() ?? (weight * 45000);
+                                final notes = data['notes'] as String? ?? '';
 
-                    return Container(
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(24),
-                        border: Border.all(color: Colors.grey.shade200),
-                        boxShadow: [
-                          BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 12, offset: const Offset(0, 6)),
-                        ],
-                      ),
-                      child: Padding(
-                        padding: const EdgeInsets.all(24),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            // --- HEADER: NAMA & STATUS ---
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      const Text('Nama Pemesan', style: TextStyle(color: Colors.black54, fontSize: 13, fontWeight: FontWeight.w600)),
-                                      const SizedBox(height: 4),
-                                      Text(data['customerName'] ?? 'Tanpa Nama', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.black87)),
-                                    ],
-                                  ),
-                                ),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                return Container(
                                   decoration: BoxDecoration(
-                                    color: isPickedUp ? Colors.green.shade50 : Colors.orange.shade50,
-                                    borderRadius: BorderRadius.circular(20),
-                                    border: Border.all(color: isPickedUp ? Colors.green.shade200 : Colors.orange.shade200),
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Icon(isPickedUp ? Icons.check_circle : Icons.pending, size: 16, color: isPickedUp ? Colors.green : Colors.orange),
-                                      const SizedBox(width: 6),
-                                      Text(
-                                        isPickedUp ? 'Selesai' : 'Diproses',
-                                        style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: isPickedUp ? Colors.green.shade700 : Colors.orange.shade800),
-                                      ),
+                                    color: Colors.white,
+                                    borderRadius: BorderRadius.circular(24),
+                                    border: Border.all(color: Colors.grey.shade200),
+                                    boxShadow: [
+                                      BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 12, offset: const Offset(0, 6)),
                                     ],
                                   ),
-                                ),
-                              ],
-                            ),
-                            const Padding(padding: EdgeInsets.symmetric(vertical: 16), child: Divider(height: 1, color: Colors.black12)),
-                            
-                            // --- DETAILS ---
-                            _buildDetailRow(Icons.calendar_today, 'Tanggal Pesan', _formatDate(orderDate)),
-                            const SizedBox(height: 12),
-                            _buildDetailRow(Icons.event, 'Jadwal Ambil', _formatDate(pickupDate)),
-                            const SizedBox(height: 12),
-                            
-                            if (notes.isNotEmpty) ...[
-                              Row(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Icon(Icons.shopping_bag_outlined, size: 20, color: Colors.grey.shade500),
-                                  const SizedBox(width: 12),
-                                  Expanded(
+                                  child: Padding(
+                                    padding: const EdgeInsets.all(24),
                                     child: Column(
                                       crossAxisAlignment: CrossAxisAlignment.start,
+                                      mainAxisSize: MainAxisSize.min,
                                       children: [
-                                        Text('Rincian Pesanan', style: TextStyle(color: Colors.grey.shade600, fontSize: 14)),
-                                        const SizedBox(height: 4),
-                                        Text(notes, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: Colors.black87, height: 1.4)),
-                                      ]
-                                    )
-                                  )
-                                ]
-                              ),
-                              const SizedBox(height: 12),
-                            ] else ...[
-                              _buildDetailRow(Icons.shopping_bag, 'Pesanan', data['items'] != null ? '${weight.toInt()} Macam Item' : '${weight.toStringAsFixed(1)} kg'),
-                              const SizedBox(height: 12),
-                            ],
+                                        // --- HEADER: NAMA & STATUS ---
+                                        Row(
+                                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Expanded(
+                                              child: Column(
+                                                crossAxisAlignment: CrossAxisAlignment.start,
+                                                children: [
+                                                  const Text('Nama Pemesan', style: TextStyle(color: Colors.black54, fontSize: 13, fontWeight: FontWeight.w600)),
+                                                  const SizedBox(height: 4),
+                                                  Text(data['customerName'] ?? 'Tanpa Nama', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.black87)),
+                                                ],
+                                              ),
+                                            ),
+                                            Container(
+                                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                              decoration: BoxDecoration(
+                                                color: isPickedUp ? Colors.green.shade50 : Colors.orange.shade50,
+                                                borderRadius: BorderRadius.circular(20),
+                                                border: Border.all(color: isPickedUp ? Colors.green.shade200 : Colors.orange.shade200),
+                                              ),
+                                              child: Row(
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  Icon(isPickedUp ? Icons.check_circle : Icons.pending, size: 16, color: isPickedUp ? Colors.green : Colors.orange),
+                                                  const SizedBox(width: 6),
+                                                  Text(
+                                                    isPickedUp ? 'Selesai' : 'Diproses',
+                                                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: isPickedUp ? Colors.green.shade700 : Colors.orange.shade800),
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                        const Padding(padding: EdgeInsets.symmetric(vertical: 16), child: Divider(height: 1, color: Colors.black12)),
+                                        
+                                        // --- DETAILS ---
+                                        _buildDetailRow(Icons.calendar_today, 'Tanggal Pesan', _formatDate(orderDate)),
+                                        const SizedBox(height: 12),
+                                        _buildDetailRow(Icons.event, 'Jadwal Ambil', _formatDate(pickupDate)),
+                                        const SizedBox(height: 12),
+                                        
+                                        if (notes.isNotEmpty) ...[
+                                          Row(
+                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            children: [
+                                              Icon(Icons.shopping_bag_outlined, size: 20, color: Colors.grey.shade500),
+                                              const SizedBox(width: 12),
+                                              Expanded(
+                                                child: Column(
+                                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                                  children: [
+                                                    Text('Rincian Pesanan', style: TextStyle(color: Colors.grey.shade600, fontSize: 14)),
+                                                    const SizedBox(height: 4),
+                                                    Text(notes, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: Colors.black87, height: 1.4)),
+                                                  ]
+                                                )
+                                              )
+                                            ]
+                                          ),
+                                          const SizedBox(height: 12),
+                                        ] else ...[
+                                          _buildDetailRow(Icons.shopping_bag, 'Pesanan', data['items'] != null ? '${weight.toInt()} Macam Item' : '${weight.toStringAsFixed(1)} kg'),
+                                          const SizedBox(height: 12),
+                                        ],
 
-                            const Padding(padding: EdgeInsets.only(top: 4, bottom: 16), child: Divider(height: 1, color: Colors.black12)),
-                            
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                const Text('Total Tagihan', style: TextStyle(fontWeight: FontWeight.w600, color: Colors.black54, fontSize: 14)),
-                                Text(_formatCurrency(totalPrice), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Colors.deepOrange)),
-                              ],
+                                        const Padding(padding: EdgeInsets.only(top: 4, bottom: 16), child: Divider(height: 1, color: Colors.black12)),
+                                        
+                                        Row(
+                                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                          children: [
+                                            const Text('Total Tagihan', style: TextStyle(fontWeight: FontWeight.w600, color: Colors.black54, fontSize: 14)),
+                                            Text(_formatCurrency(totalPrice), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Colors.deepOrange)),
+                                          ],
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                );
+                              },
                             ),
-                          ],
-                        ),
+                            ),
+                          );
+                        },
                       ),
-                    );
-                  },
+                    ),
+                    
+                    // --- PAGINATION & DELETE BUTTON ---
+                    Padding(
+                      padding: const EdgeInsets.only(left: 24, right: 24, bottom: 24, top: 8),
+                      child: Column(
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              IconButton(
+                                onPressed: _currentPage > 0 ? () {
+                                  _pageController.previousPage(duration: const Duration(milliseconds: 600), curve: Curves.easeOutCubic);
+                                } : null,
+                                icon: const Icon(Icons.arrow_back_ios, size: 20),
+                                color: Colors.deepOrange,
+                              ),
+                              Text(
+                                'Pesanan ${_currentPage + 1} dari ${_savedResis.length}',
+                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                              ),
+                              IconButton(
+                                onPressed: _currentPage < _savedResis.length - 1 ? () {
+                                  _pageController.nextPage(duration: const Duration(milliseconds: 600), curve: Curves.easeOutCubic);
+                                } : null,
+                                icon: const Icon(Icons.arrow_forward_ios, size: 20),
+                                color: Colors.deepOrange,
+                              ),
+                            ],
+                          ),
+                          Center(
+                            child: TextButton.icon(
+                              onPressed: _deleteCurrentResi,
+                              icon: const Icon(Icons.delete_outline, size: 18),
+                              label: const Text('Hapus dari Riwayat'),
+                              style: TextButton.styleFrom(foregroundColor: Colors.red.shade400),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
-            ],
-          ),
+              ),
+          ],
         ),
       ),
     );
