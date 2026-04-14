@@ -216,7 +216,10 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _isLoading = false;
 
   Future<void> _login() async {
-    if (_nameController.text.trim().isEmpty || _phoneController.text.trim().isEmpty) {
+    final inputName = _nameController.text.trim();
+    final inputPhone = _phoneController.text.trim();
+
+    if (inputName.isEmpty || inputPhone.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Nama dan Nomor WA wajib diisi!')),
       );
@@ -224,15 +227,74 @@ class _LoginScreenState extends State<LoginScreen> {
     }
 
     setState(() => _isLoading = true);
-    // Simpan identitas ke penyimpanan lokal HP (Session)
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('user_name', _nameController.text.trim());
-    await prefs.setString('user_phone', _phoneController.text.trim());
 
-    if (mounted) {
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (context) => const MainScreen()),
-      );
+    try {
+      // 1. Cek ke Firestore apakah nomor WA sudah digunakan
+      final userDoc = await FirebaseFirestore.instance.collection('users').doc(inputPhone).get();
+
+      if (userDoc.exists) {
+        final registeredName = userDoc.data()?['name'] as String? ?? '';
+        // Jika nomor sudah ada tapi namanya berbeda, tolak login (ignore besar-kecil huruf)
+        if (registeredName.toLowerCase() != inputName.toLowerCase()) {
+          setState(() => _isLoading = false);
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Nomor $inputPhone sudah terdaftar sebelumnya atas nama customer lain. Gunakan nomor yang valid'),
+                backgroundColor: Colors.red,
+                duration: const Duration(seconds: 4),
+              ),
+            );
+          }
+          return;
+        }
+        // Jika nama sama (user lama yang install ulang), biarkan login berlanjut
+      } else {
+        // 2. Jika nomor WA baru, pastikan NAMANYA belum dipakai oleh orang lain
+        final nameQuery = await FirebaseFirestore.instance
+            .collection('users')
+            .where('name', isEqualTo: inputName)
+            .get();
+
+        if (nameQuery.docs.isNotEmpty) {
+          setState(() => _isLoading = false);
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Nama "$inputName" sudah terdaftar. Silahkan gunakan nama pembeli yang lain'),
+                backgroundColor: Colors.orange.shade800,
+                duration: const Duration(seconds: 4),
+              ),
+            );
+          }
+          return; // Hentikan proses login
+        }
+
+        // Jika nomor baru dan nama juga unik, simpan ke koleksi 'users'
+        await FirebaseFirestore.instance.collection('users').doc(inputPhone).set({
+          'name': inputName,
+          'phone': inputPhone,
+          'createdAt': DateTime.now().toIso8601String(),
+        });
+      }
+
+      // 2. Simpan identitas ke penyimpanan lokal HP (Session)
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('user_name', inputName);
+      await prefs.setString('user_phone', inputPhone);
+
+      if (mounted) {
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (context) => const MainScreen()),
+        );
+      }
+    } catch (e) {
+      setState(() => _isLoading = false);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Terjadi kesalahan koneksi: $e')),
+        );
+      }
     }
   }
 
@@ -1385,10 +1447,8 @@ class _OrderHistoryTabState extends State<OrderHistoryTab> {
     await _orderStreamSubscription?.cancel(); // Cancel previous subscription if any
     _orderStreamSubscription = FirebaseFirestore.instance
         .collection('orders')
-        .where(Filter.or(
-          Filter('customerPhone', isEqualTo: userPhone),
-          Filter('customerName', isEqualTo: userName),
-        ))
+        .where('customerPhone', isEqualTo: userPhone)
+        .where('customerName', isEqualTo: userName)
         .orderBy('orderDate', descending: true) // Get newest orders first
         .snapshots()
         .listen((snapshot) async {
