@@ -1,4 +1,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Wajib untuk menampilkan pop-up push notifikasi di Android 13 ke atas -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
     <application
         android:label="pesan_keranjang_client"
         android:name="${applicationName}"

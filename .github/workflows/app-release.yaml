@@ -37,17 +37,20 @@ jobs:
         # Menimpa versi pubspec dengan versi dari GitHub Run Number
         run: flutter build apk --release --build-name=1.0.${{ github.run_number }} --build-number=${{ github.run_number }}
 
+      - name: Rename APK
+        run: mv build/app/outputs/flutter-apk/app-release.apk "build/app/outputs/flutter-apk/Pesan Keranjang.apk"
+
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: app-release-apk
-          path: build/app/outputs/flutter-apk/app-release.apk
+          name: Pesan Keranjang APK
+          path: "build/app/outputs/flutter-apk/Pesan Keranjang.apk"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v1.0.${{ github.run_number }}
           name: Release v1.0.${{ github.run_number }}
-          files: build/app/outputs/flutter-apk/app-release.apk
+          files: "build/app/outputs/flutter-apk/Pesan Keranjang.apk"
           draft: false
           prerelease: false

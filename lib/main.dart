@@ -1,17 +1,88 @@
 import 'dart:convert';
 import 'dart:math';
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:http/http.dart' as http;
 import 'firebase_options.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+
+final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
+    FlutterLocalNotificationsPlugin();
+
+@pragma('vm:entry-point')
+Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  // Mencegah error "Duplicate Firebase App" jika dijalankan di background
+  if (Firebase.apps.isEmpty) {
+    await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  }
+  debugPrint("Pesan background diterima: ${message.notification?.title}");
+
+  // Tampilkan notifikasi saat pesan diterima di background
+  if (message.notification != null) {
+    await _showNotification(message);
+  }
+}
+
+Future<void> _showNotification(RemoteMessage message) async {
+  // Inisialisasi plugin notifikasi lokal di sini. Aman untuk dipanggil berulang kali
+  // dan akan memastikan plugin siap digunakan baik di foreground maupun background.
+  const AndroidNotificationDetails androidPlatformChannelSpecifics = AndroidNotificationDetails(
+    'order_updates_channel',
+    'Notifikasi Pesanan',
+    channelDescription: 'Pembaruan status pesanan',
+    importance: Importance.max,
+    priority: Priority.high,
+    icon: '@mipmap/launcher_icon',
+  );
+  const DarwinInitializationSettings initializationSettingsDarwin = DarwinInitializationSettings();
+  const InitializationSettings initializationSettings = InitializationSettings(
+    android: AndroidInitializationSettings('@mipmap/launcher_icon'),
+    iOS: initializationSettingsDarwin,
+  );
+
+  await flutterLocalNotificationsPlugin.initialize(settings: initializationSettings);
+
+  const DarwinNotificationDetails darwinPlatformChannelSpecifics =
+      DarwinNotificationDetails();
+  const NotificationDetails platformChannelSpecifics = NotificationDetails(
+    android: androidPlatformChannelSpecifics,
+    iOS: darwinPlatformChannelSpecifics,
+  );
+
+  await flutterLocalNotificationsPlugin.show(
+    id: (message.hashCode % 100000).abs(), // Batasi nilai agar tidak melebih batas 32-bit Integer Android
+    title: message.notification?.title,
+    body: message.notification?.body,
+    notificationDetails: platformChannelSpecifics,
+  );
+}
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  try {
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
+    FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+
+    // Listener onMessage. Inisialisasi notifikasi lokal akan ditangani oleh _showNotification.
+    FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+      if (message.notification != null) {
+        _showNotification(message);
+      }
+    });
+  } catch (e) {
+    debugPrint('Gagal inisialisasi Firebase: $e');
+  }
 
   runApp(const ClientApp());
 }
@@ -65,14 +136,13 @@ class _SplashScreenState extends State<SplashScreen> {
   }
 
   Future<void> _initializeApp() async {
-    // 1. Inisialisasi Firebase
-    try {
-      await Firebase.initializeApp(
-        options: DefaultFirebaseOptions.currentPlatform,
-      );
-    } catch (e) {
-      debugPrint('Gagal inisialisasi Firebase: $e');
-    }
+    // 1. Minta Izin Notifikasi Firebase
+    final messaging = FirebaseMessaging.instance;
+    await messaging.requestPermission(
+      alert: true,
+      badge: true,
+      sound: true,
+    );
 
     // Cek apakah user sudah pernah login (menyimpan nama) sebelumnya
     final prefs = await SharedPreferences.getInstance();
@@ -172,23 +242,34 @@ class _LoginScreenState extends State<LoginScreen> {
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
-            padding: const EdgeInsets.all(32),
+            padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 48),
             child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Icon(Icons.account_circle, size: 80, color: Colors.deepOrange.shade300),
-                const SizedBox(height: 24),
-                const Text(
-                  'Selamat Datang!',
-                  style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.black87),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'Silakan isi data diri Anda. Cukup sekali saja untuk memudahkan pemesanan Anda selanjutnya.',
-                  style: TextStyle(fontSize: 15, color: Colors.grey.shade600),
-                  textAlign: TextAlign.center,
+                // --- HEADER: LOGO & JUDUL (Rata Tengah) ---
+                Column(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(20),
+                      decoration: BoxDecoration(
+                        color: Colors.deepOrange.shade50,
+                        shape: BoxShape.circle,
+                      ),
+                      child: Image.asset('assets/icon/icon.png', width: 72, height: 72),
+                    ),
+                    const SizedBox(height: 24),
+                    const Text(
+                      'Selamat Datang',
+                      style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.black87),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      'Silakan lengkapi data diri Anda untuk mempermudah proses pemesanan.',
+                      style: TextStyle(fontSize: 15, color: Colors.grey.shade600),
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 48),
                 TextField(
@@ -211,6 +292,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
                 const SizedBox(height: 32),
                 SizedBox(
+                  width: double.infinity,
                   height: 52,
                   child: FilledButton(
                     onPressed: _isLoading ? null : _login,
@@ -265,7 +347,7 @@ class _MainScreenState extends State<MainScreen> {
           children: [
             _buildNavItem(0, Icons.shopping_bag_outlined, Icons.shopping_bag, 'Pesan Kue'),
             _buildCenterNavItem(1, Icons.qr_code_scanner_outlined, Icons.qr_code_scanner, 'Scan QR'),
-            _buildNavItem(2, Icons.search_outlined, Icons.search, 'Lacak Pesanan'),
+            _buildNavItem(2, Icons.receipt_long_outlined, Icons.receipt_long, 'Daftar Pesanan'),
           ],
         ),
       ),
@@ -397,7 +479,7 @@ class _MainScreenState extends State<MainScreen> {
               });
             },
           ),
-          TrackingTab(initialResi: _scannedResi),
+          OrderHistoryTab(initialResi: _scannedResi),
         ],
       ),
       bottomNavigationBar: _buildCustomBottomNav(),
@@ -453,7 +535,6 @@ class _QRScannerTabState extends State<QRScannerTab> {
     super.initState();
     _scannerController = MobileScannerController(
       detectionSpeed: DetectionSpeed.noDuplicates,
-      autoStart: false, // Mencegah crash kamera akibat auto-start yang bentrok saat pindah tab
     );
     if (widget.isActive) _scannerController.start();
   }
@@ -502,18 +583,19 @@ class _QRScannerTabState extends State<QRScannerTab> {
             if (_isProcessing) return; // Mencegah scan ganda (Spam)
             final List<Barcode> barcodes = capture.barcodes;
             for (final barcode in barcodes) {
-            // Ambil teks, hilangkan spasi tak terlihat, dan pastikan huruf besar
-            final String? rawValue = barcode.rawValue?.trim().toUpperCase();
-            if (rawValue != null) {
-              // Validasi Pintar: Ekstrak hanya bagian yang berformat RS-XXXXXXXX
-              if (rawValue.contains('RS-')) {
-                final match = RegExp(r'RS-[A-Z0-9]{8}').firstMatch(rawValue);
-                if (match != null) {
-                  _isProcessing = true;
-                  widget.onScanSuccess(match.group(0)!); // Lempar hanya resi bersihnya
-                  break;
+              // Ambil teks secara aman tanpa peringatan null-aware operator
+              final String? rawValue = barcode.rawValue;
+              if (rawValue != null) {
+                final String cleanValue = rawValue.trim().toUpperCase();
+                // Validasi Pintar: Ekstrak hanya bagian yang berformat RS-XXXXXXXX
+                if (cleanValue.contains('RS-')) {
+                  final match = RegExp(r'RS-[A-Z0-9]{8}').firstMatch(cleanValue);
+                  if (match != null) {
+                    _isProcessing = true;
+                    widget.onScanSuccess(match.group(0)!); // Lempar hanya resi bersihnya
+                    break;
+                  }
                 }
-              }
               }
             }
           },
@@ -766,6 +848,14 @@ class _OrderFormTabState extends State<OrderFormTab> {
                           Row(
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
+                              const Text('Pemesan', style: TextStyle(fontWeight: FontWeight.w600, color: Colors.black54, fontSize: 13)),
+                              Text(_nameController.text, style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.black87, fontSize: 14)),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
                               const Text('Total Pembayaran', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.black87)),
                               Text(
                                 'Rp ${_totalPrice.toInt().toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]}.')}', 
@@ -779,15 +869,6 @@ class _OrderFormTabState extends State<OrderFormTab> {
                     const SizedBox(height: 20),
 
                     // --- INPUT FORM ---
-                    TextField(
-                      controller: _nameController,
-                      decoration: InputDecoration(
-                        labelText: 'Nama Pemesan',
-                        prefixIcon: const Icon(Icons.person_outline),
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
                     InkWell(
                       onTap: () async {
                         final picked = await showDatePicker(
@@ -825,10 +906,10 @@ class _OrderFormTabState extends State<OrderFormTab> {
                       foregroundColor: Colors.white,
                         ),
                         onPressed: () {
-                          if (_nameController.text.trim().isEmpty || _pickupDate == null) {
+                          if (_pickupDate == null) {
                             // Memunculkan Peringatan di atas pop-up
                             setModalState(() {
-                              errorMessage = 'Nama dan Tanggal Pengambilan wajib diisi!';
+                              errorMessage = 'Tanggal Pengambilan wajib dipilih!';
                             });
                           } else {
                             // Validasi sukses
@@ -892,12 +973,15 @@ class _OrderFormTabState extends State<OrderFormTab> {
 
     // Buat Ringkasan Pesanan otomatis untuk dikirim sebagai Catatan (Notes)
     final List<String> summaryList = [];
+    final List<String> notifItems = [];
     for (var entry in _cart.entries) {
       final item = _menuItems.firstWhere((m) => m['id'] == entry.key);
       final prefix = item['unit'] == 'kg' ? '${entry.value}kg' : '${entry.value}x';
       summaryList.add('- $prefix ${item['name']}');
+      notifItems.add('$prefix ${item['name']}');
     }
     final String orderSummaryNotes = summaryList.join('\n'); // Menggunakan enter (\n) ke bawah
+    final String itemsSummary = notifItems.join(' & '); // Gabungkan untuk Vercel (cth: 10kg Kue Cina & 5kg Dodol)
 
     // Munculkan Loading Screen
     showDialog(
@@ -912,6 +996,14 @@ class _OrderFormTabState extends State<OrderFormTab> {
     final randomString = List.generate(8, (index) => chars[random.nextInt(chars.length)]).join();
     final noResi = 'RS-$randomString';
 
+    // Dapatkan FCM Token perangkat klien untuk dikirim ke database
+    String? fcmToken;
+    try {
+      fcmToken = await FirebaseMessaging.instance.getToken();
+    } catch (e) {
+      debugPrint('Gagal mendapatkan FCM Token: $e');
+    }
+
     try {
       // 1. Simpan ke database Firestore dengan Document ID = noResi
       await FirebaseFirestore.instance.collection('orders').doc(noResi).set({
@@ -925,6 +1017,7 @@ class _OrderFormTabState extends State<OrderFormTab> {
         'weightKg': _totalItems.toDouble(), // Data dummy agar Tab Tracking lama tidak error
         'isPickedUp': false,
         'notes': orderSummaryNotes, // Masukkan ringkasan pesanan ke field notes
+        'fcmToken': fcmToken, // Simpan token agar admin/backend bisa kirim push notif khusus ke HP ini
       });
 
       // 2. Tembak API Vercel agar Admin dapat Push Notif
@@ -932,7 +1025,11 @@ class _OrderFormTabState extends State<OrderFormTab> {
         await http.post(
           Uri.parse('https://pesan-keranjang-backend.vercel.app/api/notify'),
           headers: {'Content-Type': 'application/json'},
-          body: jsonEncode({'customerName': name, 'weightKg': _totalItems}),
+          body: jsonEncode({
+            'customerName': name, 
+            'weightKg': _totalItems,
+            'itemsSummary': itemsSummary // Kirim data ringkasan ke Vercel
+          }),
         );
       } catch (e) {
         debugPrint('Gagal mengirim notif ke admin: $e');
@@ -940,8 +1037,12 @@ class _OrderFormTabState extends State<OrderFormTab> {
 
       // 3. Tampilkan Resi Sukses
       if (mounted) {
+        try {
+          FirebaseMessaging.instance.subscribeToTopic(noResi); // Berlangganan notif khusus resi ini
+        } catch (e) {
+          debugPrint('Gagal subscribe topic: $e');
+        }
         Navigator.pop(context); // Tutup loading screen
-        _nameController.clear();
         setState(() {
           _pickupDate = null;
           _cart.clear(); // Kosongkan keranjang
@@ -1003,7 +1104,7 @@ class _OrderFormTabState extends State<OrderFormTab> {
                 backgroundColor: const Color(0xFF25D366), // Warna Hijau WhatsApp
                 foregroundColor: Colors.white,
               ),
-              icon: const Icon(Icons.chat_bubble),
+            icon: const FaIcon(FontAwesomeIcons.whatsapp, size: 20),
               label: const Text('Kirim Notif via WhatsApp'),
             ),
             const SizedBox(height: 8),
@@ -1029,90 +1130,142 @@ class _OrderFormTabState extends State<OrderFormTab> {
   Widget build(BuildContext context) {
     return Stack(
       children: [
-        // List Menu
-        ListView.separated(
-          padding: const EdgeInsets.only(top: 16, left: 16, right: 16, bottom: 100), // Spasi bawah agar tidak tertimpa bar keranjang
-          itemCount: _menuItems.length,
-          separatorBuilder: (context, index) => const SizedBox(height: 12),
-          itemBuilder: (context, index) {
-            final item = _menuItems[index];
-            final id = item['id'] as String;
-            final qty = _cart[id] ?? 0;
-            
-            return Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(16),
-                boxShadow: [
-                  BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 8, offset: const Offset(0, 4)),
-                ],
-              ),
-              child: Row(
-                children: [
-                  // Gambar Item dengan Fallback Otomatis
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(12),
-                    child: Image.asset(
-                      'assets/items/$id.png', // Harus berekstensi .png
-                      width: 70,
-                      height: 70,
-                      fit: BoxFit.cover,
-                      errorBuilder: (context, error, stackTrace) {
-                        return Container(
-                          width: 70,
-                          height: 70,
-                          decoration: BoxDecoration(
-                            color: Colors.deepOrange.shade50,
-                            borderRadius: BorderRadius.circular(12),
+        // Katalog Menu (Gaya GoFood / GrabFood)
+        Container(
+          color: Colors.white, // Background katalog putih bersih
+          child: CustomScrollView(
+            slivers: [
+              // Header Toko
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 24, 20, 16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(Icons.storefront, color: Colors.deepOrange.shade400, size: 28),
+                          const SizedBox(width: 12),
+                          const Text(
+                            'Katalog Menu',
+                            style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.black87),
                           ),
-                          child: const Icon(Icons.cake, color: Colors.deepOrange, size: 32),
-                        );
-                      },
-                    ),
-                  ),
-                  const SizedBox(width: 16),
-                  // Info Item (Nama & Harga)
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(item['name'], style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                        const SizedBox(height: 4),
-                        Text(
-                          'Rp ${(item['price'] as int).toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]}.')} / ${item['unit']}', 
-                          style: TextStyle(fontSize: 14, color: Colors.grey.shade600),
-                        ),
-                      ],
-                    ),
-                  ),
-                  // Tombol Tambah & +/-
-                  if (qty == 0)
-                    OutlinedButton(
-                      onPressed: () => _updateCart(id, 1),
-                      style: OutlinedButton.styleFrom(
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                        side: const BorderSide(color: Colors.deepOrange),
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                        ],
                       ),
-                      child: const Text('Tambah', style: TextStyle(color: Colors.deepOrange, fontWeight: FontWeight.bold)),
-                    )
-                  else
-                    Row(
-                      children: [
-                        _buildCircleBtn(Icons.remove, () => _updateCart(id, -1)),
-                        Container(
-                          width: 36,
-                          alignment: Alignment.center,
-                          child: Text('$qty', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                        ),
-                        _buildCircleBtn(Icons.add, () => _updateCart(id, 1)),
-                      ],
-                    ),
-                ],
+                      const SizedBox(height: 8),
+                      Text(
+                        'Pilih varian kue dan dodol favorit Anda untuk acara spesial.',
+                        style: TextStyle(fontSize: 14, color: Colors.grey.shade600),
+                      ),
+                    ],
+                  ),
+                ),
               ),
-            );
-          },
+              
+              // List Item Menu
+              SliverList(
+                delegate: SliverChildBuilderDelegate(
+                  (context, index) {
+                    final item = _menuItems[index];
+                    final id = item['id'] as String;
+                    final qty = _cart[id] ?? 0;
+                    
+                    return Column(
+                      children: [
+                        const Divider(height: 1, color: Colors.black12), // Garis pembatas tipis
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              // Gambar Kiri
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(16),
+                                child: Image.asset(
+                                  'assets/items/$id.png',
+                                  width: 100,
+                                  height: 100,
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (context, error, stackTrace) {
+                                    return Container(
+                                      width: 100,
+                                      height: 100,
+                                      decoration: BoxDecoration(
+                                        color: Colors.deepOrange.shade50,
+                                        borderRadius: BorderRadius.circular(16),
+                                      ),
+                                      child: Icon(Icons.cake, color: Colors.deepOrange.shade200, size: 40),
+                                    );
+                                  },
+                                ),
+                              ),
+                              const SizedBox(width: 16),
+                              
+                              // Info Kanan (Nama, Harga, dan Tombol)
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(item['name'], style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87)),
+                                    const SizedBox(height: 6),
+                                    Text(
+                                      'Rp ${(item['price'] as int).toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]}.')} / ${item['unit']}', 
+                                      style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Colors.grey.shade700),
+                                    ),
+                                    const SizedBox(height: 16),
+                                    
+                                    // Tombol di pojok kanan
+                                    Align(
+                                      alignment: Alignment.centerRight,
+                                      child: qty == 0
+                                          ? OutlinedButton(
+                                              onPressed: () => _updateCart(id, 1),
+                                              style: OutlinedButton.styleFrom(
+                                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                                                side: BorderSide(color: Colors.deepOrange.shade400),
+                                                padding: const EdgeInsets.symmetric(horizontal: 24),
+                                                minimumSize: const Size(0, 36),
+                                              ),
+                                              child: Text('Tambah', style: TextStyle(color: Colors.deepOrange.shade600, fontWeight: FontWeight.bold, fontSize: 13)),
+                                            )
+                                          : Container(
+                                              decoration: BoxDecoration(
+                                                color: Colors.white,
+                                                borderRadius: BorderRadius.circular(20),
+                                                border: Border.all(color: Colors.grey.shade300),
+                                                boxShadow: [
+                                                  BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 4, offset: const Offset(0, 2))
+                                                ]
+                                              ),
+                                              child: Row(
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  _buildActionBtn(Icons.remove, () => _updateCart(id, -1), isAdd: false),
+                                                  Container(
+                                                    width: 36,
+                                                    alignment: Alignment.center,
+                                                    child: Text('$qty', style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+                                                  ),
+                                                  _buildActionBtn(Icons.add, () => _updateCart(id, 1), isAdd: true),
+                                                ],
+                                              ),
+                                            ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    );
+                  },
+                  childCount: _menuItems.length,
+                ),
+              ),
+              const SliverToBoxAdapter(child: SizedBox(height: 120)), // Jaga-jaga jarak bar melayang
+            ],
+          ),
         ),
         
         // Cart Bar (Gaya GoFood) Melayang di bawah
@@ -1162,81 +1315,118 @@ class _OrderFormTabState extends State<OrderFormTab> {
     );
   }
 
-  // Widget Bantuan untuk merender tombol (+) dan (-) 
-  Widget _buildCircleBtn(IconData icon, VoidCallback onTap) {
+  // Widget Bantuan untuk merender tombol Kuantitas (+) dan (-)
+  Widget _buildActionBtn(IconData icon, VoidCallback onTap, {required bool isAdd}) {
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(16),
+      borderRadius: BorderRadius.circular(20),
       child: Container(
-        padding: const EdgeInsets.all(4),
+        padding: const EdgeInsets.all(6),
         decoration: BoxDecoration(
-          border: Border.all(color: Colors.deepOrange),
+          color: isAdd ? Colors.deepOrange : Colors.transparent,
           shape: BoxShape.circle,
         ),
-        child: Icon(icon, size: 18, color: Colors.deepOrange),
+        child: Icon(icon, size: 20, color: isAdd ? Colors.white : Colors.deepOrange),
       ),
     );
   }
 }
 
 // ============================================================================
-// TAB 2: PELACAKAN PESANAN (REAL-TIME)
+// TAB 2: DAFTAR PESANAN
 // ============================================================================
-class TrackingTab extends StatefulWidget {
+class OrderHistoryTab extends StatefulWidget {
   final String? initialResi;
 
-  const TrackingTab({super.key, this.initialResi});
+  const OrderHistoryTab({super.key, this.initialResi});
 
   @override
-  State<TrackingTab> createState() => _TrackingTabState();
+  State<OrderHistoryTab> createState() => _OrderHistoryTabState();
 }
 
-class _TrackingTabState extends State<TrackingTab> {
-  final _resiController = TextEditingController();
+class _OrderHistoryTabState extends State<OrderHistoryTab> {
   final PageController _pageController = PageController(viewportFraction: 0.88);
   List<String> _savedResis = [];
   int _currentPage = 0;
   bool _isLoadingCache = true;
+  StreamSubscription<QuerySnapshot>? _orderStreamSubscription;
 
   @override
   void initState() {
     super.initState();
-    _initCache(widget.initialResi);
+    _loadAndSyncOrders();
   }
 
-  Future<void> _initCache(String? newResi) async {
+  Future<void> _loadAndSyncOrders() async {
     final prefs = await SharedPreferences.getInstance();
-    List<String> saved = prefs.getStringList('saved_resis') ?? [];
 
-    if (newResi != null && newResi.isNotEmpty) {
-      saved.remove(newResi);
-      saved.insert(0, newResi);
-      await prefs.setStringList('saved_resis', saved);
+    // 1. Load from cache first for instant UI
+    List<String> cachedResis = prefs.getStringList('saved_resis') ?? [];
+
+    // If coming from another tab, add the new resi to the top for immediate view
+    if (widget.initialResi != null && widget.initialResi!.isNotEmpty) {
+      cachedResis.remove(widget.initialResi);
+      cachedResis.insert(0, widget.initialResi!);
     }
-
+    
     if (mounted) {
       setState(() {
-        _savedResis = saved;
+        _savedResis = cachedResis;
         _isLoadingCache = false;
-        if (saved.isNotEmpty) {
-          _resiController.text = saved[0];
-        }
       });
     }
+// Not logged in, nothing to sync.
+    // 2. Get user phone & name to start real-time sync
+    final userPhone = prefs.getString('user_phone') ?? '';
+    final userName = prefs.getString('user_name') ?? '';
+    if (userPhone.isEmpty && userName.isEmpty) return; // Not logged in, nothing to sync.
+
+    // 3. Start listening to Firestore for real-time updates
+    await _orderStreamSubscription?.cancel(); // Cancel previous subscription if any
+    _orderStreamSubscription = FirebaseFirestore.instance
+        .collection('orders')
+        .where(Filter.or(
+          Filter('customerPhone', isEqualTo: userPhone),
+          Filter('customerName', isEqualTo: userName),
+        ))
+        .orderBy('orderDate', descending: true) // Get newest orders first
+        .snapshots()
+        .listen((snapshot) async {
+      final serverResis = snapshot.docs.map((doc) => doc.id).toList();
+
+      // Subscribe to topics for all orders associated with this user
+      for (String resi in serverResis) {
+        FirebaseMessaging.instance.subscribeToTopic(resi).catchError((e) => debugPrint('Gagal subscribe topic (sync): $e'));
+      }
+
+      if (mounted) setState(() => _savedResis = serverResis);
+
+      // Update the cache in the background
+      await prefs.setStringList('saved_resis', serverResis);
+    }, onError: (error) {
+      debugPrint('\n=== 🚨 ERROR SINKRONISASI FIRESTORE ===');
+      debugPrint(error.toString());
+      debugPrint('=======================================\n');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Gagal sinkronisasi! Cek Debug Console.')),
+        );
+      }
+    });
   }
 
   @override
   void dispose() {
     _pageController.dispose();
-    _resiController.dispose();
+    _orderStreamSubscription?.cancel();
     super.dispose();
   }
 
   @override
-  void didUpdateWidget(TrackingTab oldWidget) {
+  void didUpdateWidget(OrderHistoryTab oldWidget) {
     super.didUpdateWidget(oldWidget);
     // Jalankan otomatis ketika resi baru dioper dari Tab Scanner
-    if (widget.initialResi != oldWidget.initialResi && widget.initialResi != null && widget.initialResi!.isNotEmpty) {
+    if (widget.initialResi != null && widget.initialResi != oldWidget.initialResi) {
       _addNewResi(widget.initialResi!);
     }
   }
@@ -1247,11 +1437,15 @@ class _TrackingTabState extends State<TrackingTab> {
     _savedResis.remove(resi);
     _savedResis.insert(0, resi); // Taruh di paling atas/baru
     await prefs.setStringList('saved_resis', _savedResis);
+    try {
+      FirebaseMessaging.instance.subscribeToTopic(resi); // Langganan notif resi hasil scan
+    } catch (e) {
+      debugPrint('Gagal subscribe topic: $e');
+    }
 
     if (mounted) {
       setState(() {
         _currentPage = 0;
-        _resiController.text = resi;
       });
       if (_pageController.hasClients) {
         _pageController.jumpToPage(0);
@@ -1259,26 +1453,21 @@ class _TrackingTabState extends State<TrackingTab> {
     }
   }
 
-  Future<void> _deleteCurrentResi() async {
-    if (_savedResis.isEmpty) return;
-    final prefs = await SharedPreferences.getInstance();
-    _savedResis.removeAt(_currentPage);
-    await prefs.setStringList('saved_resis', _savedResis);
+  Future<void> _launchWhatsAppChat(String resi) async {
+    final String message = 'Halo Admin Pesan Keranjang, saya ingin bertanya mengenai pesanan saya dengan nomor resi: *$resi*.';
+    final Uri whatsappUri = Uri.parse(
+      'https://wa.me/6281298158550?text=${Uri.encodeComponent(message)}',
+    );
 
-    if (mounted) {
-      setState(() {
-        if (_currentPage >= _savedResis.length && _currentPage > 0) {
-          _currentPage--; // Mundur 1 halaman jika yang dihapus adalah halaman terakhir
-        }
-        if (_savedResis.isNotEmpty) {
-          _resiController.text = _savedResis[_currentPage];
-          if (_pageController.hasClients) {
-            _pageController.jumpToPage(_currentPage);
-          }
-        } else {
-          _resiController.clear();
-        }
-      });
+    try {
+      final launched = await launchUrl(whatsappUri, mode: LaunchMode.externalApplication);
+      if (!launched) throw Exception('Gagal membuka link');
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Tidak dapat membuka WhatsApp. Pastikan aplikasi sudah terinstall.')),
+        );
+      }
     }
   }
 
@@ -1305,42 +1494,12 @@ class _TrackingTabState extends State<TrackingTab> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('Lacak Pesanan', style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.black87)),
-                  Text('Masukkan nomor resi untuk melihat status terkini.', style: TextStyle(fontSize: 16, color: Colors.grey.shade600)),
-                  const SizedBox(height: 24),
-                  
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: _resiController,
-                          decoration: const InputDecoration(
-                            labelText: 'Nomor Resi',
-                            hintText: 'Contoh: RS-A1B2C3D4',
-                            prefixIcon: Icon(Icons.search, color: Colors.deepOrange),
-                          ),
-                          onSubmitted: (val) => _addNewResi(val.trim()),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      SizedBox(
-                        height: 56,
-                        child: FilledButton(
-                          onPressed: () => _addNewResi(_resiController.text.trim()),
-                          style: FilledButton.styleFrom(
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                            backgroundColor: Colors.deepOrange,
-                            foregroundColor: Colors.white,
-                          ),
-                          child: const Text('Cari', style: TextStyle(fontWeight: FontWeight.bold)),
-                        ),
-                      ),
-                    ],
-                  ),
+                  const Text('Daftar Pesanan', style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.black87)),
+                  Text('Riwayat pesanan yang telah Anda buat.', style: TextStyle(fontSize: 16, color: Colors.grey.shade600)),
                 ],
               ),
             ),
-            const SizedBox(height: 32),
+            const SizedBox(height: 24),
 
             if (_isLoadingCache)
               const Expanded(child: Center(child: CircularProgressIndicator()))
@@ -1362,17 +1521,20 @@ class _TrackingTabState extends State<TrackingTab> {
                 child: Column(
                   children: [
                     Expanded(
+                      flex: 10, // Ruang diperbesar agar card lebih panjang ke bawah dan isinya tidak kepotong
                       child: PageView.builder(
                         physics: const BouncingScrollPhysics(),
                         controller: _pageController,
                         onPageChanged: (index) {
                           setState(() {
                             _currentPage = index;
-                            _resiController.text = _savedResis[index];
                           });
                         },
                         itemCount: _savedResis.length,
                         itemBuilder: (context, index) {
+                          if (index >= _savedResis.length) return const SizedBox();
+                          final currentResi = _savedResis[index];
+
                           return AnimatedBuilder(
                             animation: _pageController,
                             builder: (context, child) {
@@ -1394,7 +1556,7 @@ class _TrackingTabState extends State<TrackingTab> {
                             child: SingleChildScrollView(
                               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
                               child: StreamBuilder<DocumentSnapshot>(
-                              stream: FirebaseFirestore.instance.collection('orders').doc(_savedResis[index]).snapshots(),
+                              stream: FirebaseFirestore.instance.collection('orders').doc(currentResi).snapshots(),
                               builder: (context, snapshot) {
                                 if (snapshot.connectionState == ConnectionState.waiting) {
                                   return const Center(child: CircularProgressIndicator());
@@ -1405,16 +1567,16 @@ class _TrackingTabState extends State<TrackingTab> {
                                     child: Column(
                                       mainAxisAlignment: MainAxisAlignment.center,
                                       children: [
-                                        Icon(Icons.search_off, size: 64, color: Colors.grey.shade400),
+                                        Icon(Icons.delete_outline, size: 64, color: Colors.grey.shade400),
                                         const SizedBox(height: 16),
-                                        Text('Pesanan tidak ditemukan.', style: TextStyle(fontSize: 18, color: Colors.grey.shade600)),
-                                        const Text('Resi salah, atau pesanan sudah dihapus oleh Admin.', style: TextStyle(color: Colors.grey)),
+                                        Text('Pesanan telah dihapus.', style: TextStyle(fontSize: 18, color: Colors.grey.shade600)),
+                                        const Text('Menunggu sinkronisasi...', style: TextStyle(color: Colors.grey)),
                                       ],
                                     ),
                                   );
                                 }
 
-                                final data = snapshot.data!.data() as Map<String, dynamic>;
+                                  final data = (snapshot.data!.data() as Map<String, dynamic>?) ?? {};
                                 final isPickedUp = data['isPickedUp'] ?? false;
                                 final pickupDate = DateTime.tryParse(data['pickupDate'] ?? '') ?? DateTime.now();
                                 final orderDate = DateTime.tryParse(data['orderDate'] ?? '') ?? DateTime.now();
@@ -1432,12 +1594,12 @@ class _TrackingTabState extends State<TrackingTab> {
                                     ],
                                   ),
                                   child: Padding(
-                                    padding: const EdgeInsets.all(24),
+                                    padding: const EdgeInsets.only(left: 24, right: 24, top: 24, bottom: 32),
                                     child: Column(
                                       crossAxisAlignment: CrossAxisAlignment.start,
                                       mainAxisSize: MainAxisSize.min,
                                       children: [
-                                        // --- HEADER: NAMA & STATUS ---
+                                        // --- HEADER: RESI & STATUS ---
                                         Row(
                                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                           crossAxisAlignment: CrossAxisAlignment.start,
@@ -1446,9 +1608,9 @@ class _TrackingTabState extends State<TrackingTab> {
                                               child: Column(
                                                 crossAxisAlignment: CrossAxisAlignment.start,
                                                 children: [
-                                                  const Text('Nama Pemesan', style: TextStyle(color: Colors.black54, fontSize: 13, fontWeight: FontWeight.w600)),
+                                                  const Text('Nomor Resi', style: TextStyle(color: Colors.black54, fontSize: 13, fontWeight: FontWeight.w600)),
                                                   const SizedBox(height: 4),
-                                                  Text(data['customerName'] ?? 'Tanpa Nama', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.black87)),
+                                                  Text(data['resi'] ?? currentResi, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black87, letterSpacing: 0.5)),
                                                 ],
                                               ),
                                             ),
@@ -1514,6 +1676,22 @@ class _TrackingTabState extends State<TrackingTab> {
                                             Text(_formatCurrency(totalPrice), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Colors.deepOrange)),
                                           ],
                                         ),
+                                        const SizedBox(height: 24),
+                                        // --- TOMBOL WHATSAPP DIPINDAH KE DALAM KARTU ---
+                                        SizedBox(
+                                          width: double.infinity,
+                                          height: 48,
+                                          child: FilledButton.icon(
+                                            onPressed: () => _launchWhatsAppChat(data['resi'] ?? currentResi),
+                                            icon: const FaIcon(FontAwesomeIcons.whatsapp, size: 20),
+                                            label: const Text('Hubungi Admin', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                                            style: FilledButton.styleFrom(
+                                              backgroundColor: const Color(0xFF25D366), // Warna hijau WhatsApp
+                                              foregroundColor: Colors.white,
+                                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                                            ),
+                                          ),
+                                        ),
                                       ],
                                     ),
                                   ),
@@ -1528,7 +1706,7 @@ class _TrackingTabState extends State<TrackingTab> {
                     
                     // --- PAGINATION & DELETE BUTTON ---
                     Padding(
-                      padding: const EdgeInsets.only(left: 24, right: 24, bottom: 24, top: 8),
+                      padding: const EdgeInsets.only(left: 24, right: 24, bottom: 8, top: 0),
                       child: Column(
                         children: [
                           Row(
@@ -1554,17 +1732,10 @@ class _TrackingTabState extends State<TrackingTab> {
                               ),
                             ],
                           ),
-                          Center(
-                            child: TextButton.icon(
-                              onPressed: _deleteCurrentResi,
-                              icon: const Icon(Icons.delete_outline, size: 18),
-                              label: const Text('Hapus dari Riwayat'),
-                              style: TextButton.styleFrom(foregroundColor: Colors.red.shade400),
-                            ),
-                          ),
                         ],
                       ),
                     ),
+                    const Spacer(flex: 1), // Ruang kosong tambahan untuk mendorong pagination ke atas
                   ],
                 ),
               ),
@@ -1581,8 +1752,10 @@ class _TrackingTabState extends State<TrackingTab> {
         Icon(icon, size: 20, color: Colors.grey.shade500),
         const SizedBox(width: 12),
         Text(label, style: TextStyle(color: Colors.grey.shade600, fontSize: 14)),
-        const Spacer(),
-        Text(value, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: valueColor ?? Colors.black87), textAlign: TextAlign.right),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Text(value, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: valueColor ?? Colors.black87), textAlign: TextAlign.right),
+        ),
       ],
     );
   }
